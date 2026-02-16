@@ -34,7 +34,7 @@ def nandetrend(y):
     
     x = np.arange(0,y.shape[0],1)
     m, b, r_val, p_val, std_err = stats.linregress(x,np.array(y))
-    y_detrended= np.array(y) - m*x
+    y_detrended= np.array(y) - m*x-b
     return y_detrended
 
 def find_event(timeserie_ano_ABA_file,treshold):
@@ -1754,6 +1754,7 @@ def plot_amo(data_amo):
 def read_compute_anomalies_uwind_plot(data):
 
     ds = xr.open_dataset(data,engine='pydap')
+    
     ds= ds.sel(time=slice(datetime.datetime(1982, 1, 1), now))
     uwnd = xr.concat([ds.uwnd[:, :, 72:], ds.uwnd[:, :, :72]], dim='lon')
     uwnd.coords['lon'] = (uwnd.coords['lon'] + 180) % 360 - 180
@@ -1764,7 +1765,7 @@ def read_compute_anomalies_uwind_plot(data):
     uwnd_atl4 = uwnd.where((  uwnd.lon>=-40) & (uwnd.lon<=-20) &
                            (uwnd.lat<=3) & (uwnd.lat>=-3),drop=True)
     uwnd_atl4 = uwnd_atl4.weighted(np.cos(np.deg2rad(uwnd_atl4.lat))).mean(('lon','lat'))
-
+    uwnd_atl4 = uwnd_atl4.where(np.isfinite(uwnd_atl4)==True,drop=True)
 
     ## Linearly detrend the data ## 
     uwnd_atl4 = uwnd_atl4.assign_coords(uwnd_dtd=('time',  nandetrend(uwnd_atl4.values)))
