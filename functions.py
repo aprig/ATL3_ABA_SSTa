@@ -259,11 +259,26 @@ def read_data_compute_anomalies_oi(path_data):
 
 def read_data_compute_anomalies(path_data):
     
-    ds = xr.open_dataset(path_data,engine='pydap')
-    sst= ds.sst.sel(time=slice(datetime.datetime(1982, 1, 1), now))
-    sst = xr.concat([sst[:, :, 180:], sst[:, :, :180]], dim='lon')
-    sst.coords['lon'] = (sst.coords['lon'] + 180) % 360 - 180  
+#     ds = xr.open_dataset(path_data,engine='pydap', chunks={"time": 120})
     
+    ds = xr.open_dataset(
+    path_data,
+    engine="pydap",
+    chunks={"time":60}
+)
+
+    # Load only tropical region
+    sst = ds["sst"].sel(
+        lat=slice(31,-31),
+        time=slice("1982-01-01", None)
+    ).load()
+
+
+    
+#     sst= ds.sst.sel(time=slice(datetime.datetime(1982, 1, 1), now))
+    sst = sst.roll(lon=180, roll_coords=True)
+    sst['lon'] = ((sst.lon + 180) % 360) - 180
+    sst = sst.sortby('lon')
     
     ## Make sub areas ##
     sst_atl3 = sst.where((  sst.lon>=-20) & (sst.lon<=0) &
@@ -334,10 +349,21 @@ def read_data_compute_anomalies(path_data):
 
 def read_data_compute_anomalies_ersstv5(path_data):
     
-    ds = xr.open_dataset(path_data,engine='pydap')
-    sst= ds.sst.sel(time=slice(datetime.datetime(1982, 1, 1), now))
-    sst = xr.concat([sst[:, :, 90:], sst[:, :, :90]], dim='lon')
-    sst.coords['lon'] = (sst.coords['lon'] + 180) % 360 - 180  
+    ds = xr.open_dataset(
+        path_data,
+        engine="pydap",
+        chunks={"time":60}
+    )
+
+    # Load only tropical region
+    sst = ds["sst"].sel(
+        lat=slice(31,-31),
+        time=slice("1982-01-01", None)
+    ).load()
+    
+    sst = sst.roll(lon=180, roll_coords=True)
+    sst['lon'] = ((sst.lon + 180) % 360) - 180
+    sst = sst.sortby('lon')
     
     ## Make sub areas ##
     sst_atl3 = sst.where((  sst.lon>=-20) & (sst.lon<=0) &
@@ -403,7 +429,6 @@ def read_data_compute_anomalies_ersstv5(path_data):
     iod_index = ssta_iod_w - ssta_iod_e
     
     return ssta_atl3_norm,ssta_aba_norm,ssta_nino34_norm,ssta_dni_norm,ssta_cni_norm,ssta_nni_norm,iod_index
-
 
 
 
@@ -535,7 +560,50 @@ def create_table_event(ssta):
     
     return warm,cold,df_warm,df_cold
 
+def create_table_event_new(ssta):
 
+    warm, cold = find_event(ssta, ssta.std(dim='time'))
+
+    # ---- helper function ----
+    def build_table(events, ssta, warm_event=True):
+
+        mask = events[2, :] >= 3
+        start_idx = events[0, mask]
+        end_idx = events[1, mask]
+        duration = events[2, mask]
+
+        rows = []
+
+        for s, e, d in zip(start_idx, end_idx, duration):
+
+            segment = ssta[s:e]
+
+            mean_ssta = segment.mean().item()
+            cumul_ssta = segment.sum().item()
+
+            if warm_event:
+                extreme_val = segment.max().item()
+                extreme_date = segment.time[segment.argmax("time")].values
+            else:
+                extreme_val = segment.min().item()
+                extreme_date = segment.time[segment.argmin("time")].values
+
+            rows.append({
+                "Start date": pd.to_datetime(ssta.time[s].values).strftime("%Y-%m"),
+                "End date": pd.to_datetime(ssta.time[e].values).strftime("%Y-%m"),
+                "Duration": int(d),
+                "Mean SSTa": np.round(mean_ssta, 2),
+                "Cumul SSTa": np.round(cumul_ssta, 2),
+                "Max SSTa": np.round(extreme_val, 2),
+                "Date max SSTa": pd.to_datetime(extreme_date).strftime("%Y-%m")
+            })
+
+        return pd.DataFrame(rows)
+
+    df_warm = build_table(warm, ssta, warm_event=True)
+    df_cold = build_table(cold, ssta, warm_event=False)
+
+    return warm, cold, df_warm, df_cold
 
 def plot_anomalies(ssta_atl3,ssta_aba,ssta_nino34,ssta_dni,ssta_cni,ssta_nni):
     
@@ -864,11 +932,26 @@ def read_data_compute_anomalies_map_atl(path_data):
 
 def read_data_ACT_week_plot_ersstv5(path_data):
 
-    ds = xr.open_dataset(path_data+'sst.mnmean.nc',engine='pydap')
-    sst= ds.sst.sel(time=slice(datetime.datetime(1982, 1, 1), now))
-    sst = xr.concat([sst[:, :, 90:], sst[:, :, :90]], dim='lon')
-    sst.coords['lon'] = (sst.coords['lon'] + 180) % 360 - 180  
 
+    ds = xr.open_dataset(
+    path_data+'sst.mnmean.nc',
+    engine="pydap",
+    chunks={"time":60}
+)
+
+    # Load only tropical region
+    sst = ds["sst"].sel(
+        lat=slice(31,-31),
+        time=slice("1982-01-01", None)
+    ).load()
+
+
+    
+#     sst= ds.sst.sel(time=slice(datetime.datetime(1982, 1, 1), now))
+    sst = sst.roll(lon=180, roll_coords=True)
+    sst['lon'] = ((sst.lon + 180) % 360) - 180
+    sst = sst.sortby('lon')
+    
     ## Make sub areas ##
     sst_act = sst.where((  sst.lon>=-30) & (sst.lon<=12) &
                            (sst.lat<=5) & (sst.lat>=-5),drop=True)
@@ -1217,12 +1300,21 @@ def plot_wamoi_old(cmap_data):
     ax[2].set_xticklabels(xtime)
     ax[2].tick_params(axis='x', labelrotation=45)
     
-def plot_wamoi(path_data):
-    ds = xr.open_dataset(path_data,engine='pydap')
-
-    ds= ds.sel(time=slice(datetime.datetime(2000, 1, 1), now))
-    precip = xr.concat([ds.precip[:, :, 72:], ds.precip[:, :, :72]], dim='lon')
-    precip.coords['lon'] = (precip.coords['lon'] + 180) % 360 - 180
+def plot_wamoi(path_data): 
+    ds = xr.open_dataset(
+    path_data,
+    engine="pydap",
+    chunks={"time":60}
+)
+    # Load only tropical region
+    precip = ds["precip"].sel(
+        lat=slice(20,-20),
+        time=slice("2000-01-01", None)
+    ).load()
+    
+    precip = precip.roll(lon=180, roll_coords=True)
+    precip['lon'] = ((precip.lon + 180) % 360) - 180
+    precip = precip.sortby('lon')
 
     precip = precip.where(precip>-1e36)
 
@@ -1751,13 +1843,27 @@ def plot_amo(data_amo):
                weight='bold')
     
     
-def read_compute_anomalies_uwind_plot(data):
+def read_compute_anomalies_uwind_plot(path_data):
 
-    ds = xr.open_dataset(data,engine='pydap')
     
-    ds= ds.sel(time=slice(datetime.datetime(1982, 1, 1), now))
-    uwnd = xr.concat([ds.uwnd[:, :, 72:], ds.uwnd[:, :, :72]], dim='lon')
-    uwnd.coords['lon'] = (uwnd.coords['lon'] + 180) % 360 - 180
+    ds = xr.open_dataset(
+    path_data,
+    engine="pydap",
+    chunks={"time":60}
+)
+
+    # Load only tropical region
+    uwnd = ds["uwnd"].sel(
+        lat=slice(5,-5),
+        time=slice("1982-01-01", None)
+    ).load()
+
+
+    
+#     sst= ds.sst.sel(time=slice(datetime.datetime(1982, 1, 1), now))
+    uwnd = uwnd.roll(lon=180, roll_coords=True)
+    uwnd['lon'] = ((uwnd.lon + 180) % 360) - 180
+    uwnd = uwnd.sortby('lon')
 
 
 
@@ -1809,12 +1915,18 @@ def read_compute_anomalies_uwind_plot(data):
     
     
 def plot_slp(ncep_data_slp):
-    ds = xr.open_dataset(ncep_data_slp,engine='pydap')
-    ds= ds.sel(time=slice(datetime.datetime(1982, 1, 1), now))
-    slp = xr.concat([ds.slp[:, :, 72:], ds.slp[:, :, :72]], dim='lon')
-    slp.coords['lon'] = (slp.coords['lon'] + 180) % 360 - 180
-    slp_atl = slp.where((  slp.lon>=-30) & (slp.lon<=-10) &
-                           (slp.lat<=-20) & (slp.lat>=-40),drop=True)
+
+    ds = xr.open_dataset(
+    ncep_data_slp,
+    engine="pydap",
+    chunks={"time":60}
+)
+
+    slp_atl = ds["slp"].sel(
+        lon=slice(330,350),   # same as -30 to -10 in 0–360 coordinates
+        lat=slice(-20,-40),
+        time=slice("1982-01-01", None)
+    ).load()
     slp_atl = slp_atl.weighted(np.cos(np.deg2rad(slp_atl.lat))).mean(('lon','lat'))
     
 
