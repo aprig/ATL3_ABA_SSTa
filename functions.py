@@ -436,10 +436,21 @@ def read_data_compute_anomalies_ersstv5(path_data):
 
 def read_data_compute_anomalies_ersstv5_for_mail(path_data):
     
-    ds = xr.open_dataset(path_data,engine='pydap')
-    sst= ds.sst.sel(time=slice(datetime.datetime(1982, 1, 1), now))
-    sst = xr.concat([sst[:, :, 90:], sst[:, :, :90]], dim='lon')
-    sst.coords['lon'] = (sst.coords['lon'] + 180) % 360 - 180  
+    ds = xr.open_dataset(
+        path_data,
+        engine="pydap",
+        chunks={"time":60}
+    )
+
+    # Load only tropical region
+    sst = ds["sst"].sel(
+        lat=slice(31,-31),
+        time=slice("1982-01-01", None)
+    ).load()
+    
+    sst = sst.roll(lon=180, roll_coords=True)
+    sst['lon'] = ((sst.lon + 180) % 360) - 180
+    sst = sst.sortby('lon')
     
     ## Make sub areas ##
     sst_atl3 = sst.where((  sst.lon>=-20) & (sst.lon<=0) &
